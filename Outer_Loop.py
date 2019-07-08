@@ -190,6 +190,7 @@ def dc_bus_vc(VDCA8, IPVAxxx, MPPTRSET, MPPT_CTL, VMPPA, block8, reset8, time):
 
     return Isdref_V28x
 
+# Git Test
 
 # def get_Isqref_V38(QSrefA8, Qmeas8, block8, reset8):
 #
