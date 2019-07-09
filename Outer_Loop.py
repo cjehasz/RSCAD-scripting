@@ -1,5 +1,9 @@
 # This module is meant to replace the DC Bus Control system in PV controls
 
+import socket
+import struct
+
+
 # Limit function is bypassed if both upper and lower bound are set to zero
 
 
@@ -190,7 +194,11 @@ def dc_bus_vc(VDCA8, IPVAxxx, MPPTRSET, MPPT_CTL, VMPPA, block8, reset8, time):
 
     return Isdref_V28x
 
-# Git Test
+
+hostname = socket.gethostname()
+IPAddr = socket.gethostbyname(hostname)
+# print("Your Computer Name is: " + hostname)
+# print("Your Computer IP Address is: " + IPAddr)
 
 # def get_Isqref_V38(QSrefA8, Qmeas8, block8, reset8):
 #
