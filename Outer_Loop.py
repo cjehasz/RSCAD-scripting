@@ -1,12 +1,13 @@
 # This module is meant to replace the DC Bus Control system in PV controls
 
+# Import section
 import socket
 import struct
 
+# ------------------- FUNCTION AND CLASS DEFINITIONS ----------------------------------------------------------------
+
 
 # Limit function is bypassed if both upper and lower bound are set to zero
-
-
 def limit(x, lower_lim, upper_lim):
 
     if lower_lim != 0 and upper_lim != 0:
@@ -145,18 +146,6 @@ class PiControlVDC:
         return PrefPV
 
 
-dt = 0.001                              # Find out how to get timestep
-
-# Build Control Components
-
-mppt_blk = MPPT(5, 2, 0.250)
-pi_ctl_vdc = PiControlVDC(5, 1, 5, -5)
-pi_ctl_vac = PiControlVDC(5, 0.025, 5, -5)
-pi_ctl_q = PiControlVDC(5, 1, 5, -5)
-real_pole_vpvf = RealPole(0.001, 1, dt, 0, 0, 0)
-real_pole_ika = RealPole(0.001, 1, dt, 0, 0, 0)
-
-
 def dc_bus_vc(VDCA8, IPVAxxx, MPPTRSET, MPPT_CTL, VMPPA, block8, reset8, time):
 
     VPVF = real_pole_vpvf.calculate(VDCA8)
@@ -195,11 +184,6 @@ def dc_bus_vc(VDCA8, IPVAxxx, MPPTRSET, MPPT_CTL, VMPPA, block8, reset8, time):
     return Isdref_V28x
 
 
-hostname = socket.gethostname()
-IPAddr = socket.gethostbyname(hostname)
-# print("Your Computer Name is: " + hostname)
-# print("Your Computer IP Address is: " + IPAddr)
-
 # def get_Isqref_V38(QSrefA8, Qmeas8, block8, reset8):
 #
 #     Qerr8 = (QSrefA8 - Qmeas8) * block8
@@ -233,4 +217,63 @@ IPAddr = socket.gethostbyname(hostname)
 #         return 0, 0
 #     else:
 #         return Isdrefongrid8, (block8 * Isqref_bank[(select-1)])
+
+# ------------------- MAIN CODE ------------------------------------------------------------------------------------
+
+dt = 0.00012    # 0.2e-3
+t = 0.0         # time counter
+
+# Build Control Components ----------------------------------------
+
+# For dc_bus_vc:
+mppt_blk = MPPT(5, 2, 0.250)
+pi_ctl_vdc = PiControlVDC(5, 1, 5, -5)
+real_pole_vpvf = RealPole(0.001, 1, dt, 0, 0, 0)
+real_pole_ika = RealPole(0.001, 1, dt, 0, 0, 0)
+
+# # For ac_bus_vc
+# pi_ctl_vac = PiControlVDC(5, 0.025, 5, -5)
+
+# # For get_IsqrefV38
+# pi_ctl_q = PiControlVDC(5, 1, 5, -5)
+
+# Network Code ----------------------------------------------------
+
+IPAddr = socket.gethostbyname(socket.gethostname())
+# print("Your Computer IP Address is: " + IPAddr)
+
+# RTDS import/export
+UDP_IP_ctr = IPAddr
+UDP_IP_rtds = '10.16.158.23'
+UDP_PORT = 12345
+sock = socket.socket(socket.AF_INET,  # Internet
+                     socket.SOCK_DGRAM)  # UDP
+sock.bind((UDP_IP_ctr, UDP_PORT))
+
+# sock.settimeout(30)
+
+while True:
+    data, addr = sock.recvfrom(1024)
+    F = struct.unpack('>fffffff', data)       # Number of 'f' is number of variables being sent or received
+
+    # Assign variables from packet
+    VDCA8 = F[0]
+    IPVAxxx = F[1]
+    MPPTRSET = F[2]
+    MPPT_CTL = F[3]
+    VMPPA = F[4]
+    block8 = F[5]
+    reset8 = F[6]
+
+    # Calculate control signal
+    Isdref_V28x = dc_bus_vc(VDCA8, IPVAxxx, MPPTRSET, MPPT_CTL, VMPPA, block8, reset8, t)
+
+    # Send ctl signal back
+    y = struct.pack('>f', Isdref_V28x)
+    sock.sendto(y, (UDP_IP_rtds, UDP_PORT))
+
+    # increment time counter
+    t = t + dt
+
+    # Repeat loop (set socket timeout or other exit condition?)
 
