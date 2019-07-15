@@ -10,11 +10,11 @@ import struct
 # Limit function is bypassed if both upper and lower bound are set to zero
 def limit(x, lower_lim, upper_lim):
 
-    if lower_lim != 0 and upper_lim != 0:
-        return max(lower_lim, min(x, upper_lim))
+    if lower_lim == 0 and upper_lim == 0:
+        return x
 
     else:
-        return x
+        return max(lower_lim, min(x, upper_lim))
 
 
 class Integrator:  # Integrator is internally limited, set limits to zero for unlimited operation
@@ -23,7 +23,7 @@ class Integrator:  # Integrator is internally limited, set limits to zero for un
 
         self.Rval = Rval
         self.upper_lim = upper_lim
-        self.lower_lim = lower_lim           # future getTimestamp()?
+        self.lower_lim = lower_lim
         self.k = dt/(2*T)
         self.old_x = 0
         self.old_out = 0
@@ -32,8 +32,8 @@ class Integrator:  # Integrator is internally limited, set limits to zero for un
     def reset(self):
 
         self.old_x = 0
-        self.old_out = 0
-        self.output = 0
+        self.old_out = self.Rval
+        self.output = self.Rval
 
     def calculate(self, x):
 
@@ -133,6 +133,7 @@ class PiControlVDC:
         integrator_input = (VDCerr + self.fb_loop) * self.KiVDC
 
         if reset8 != 0:
+            self.fb_loop = 0
             self.integrator.reset()
             integrator_output = 0
         else:
@@ -220,7 +221,7 @@ def dc_bus_vc(VDCA8, IPVAxxx, MPPTRSET, MPPT_CTL, VMPPA, block8, reset8, time):
 
 # ------------------- MAIN CODE ------------------------------------------------------------------------------------
 
-dt = 0.00012    # 0.2e-3
+dt = 0.0002    # 0.2e-3
 t = 0.0         # time counter
 
 # Build Control Components ----------------------------------------
@@ -244,7 +245,7 @@ IPAddr = socket.gethostbyname(socket.gethostname())
 
 # RTDS import/export
 UDP_IP_ctr = IPAddr
-UDP_IP_rtds = '10.16.158.23'
+UDP_IP_rtds = '10.16.158.36'
 UDP_PORT = 12345
 sock = socket.socket(socket.AF_INET,  # Internet
                      socket.SOCK_DGRAM)  # UDP
@@ -252,10 +253,14 @@ sock.bind((UDP_IP_ctr, UDP_PORT))
 
 # sock.settimeout(30)
 
-while True:
-    data, addr = sock.recvfrom(1024)
-    F = struct.unpack('>fffffff', data)       # Number of 'f' is number of variables being sent or received
+print(IPAddr)
 
+while True:
+    # print("receiving data")
+    data, addr = sock.recvfrom(1024)
+    # F = struct.unpack('>fffffff', data)       # Number of 'f' is number of variables being sent or received
+    F = struct.unpack('>ffiiffi', data)
+    # print(F)
     # Assign variables from packet
     VDCA8 = F[0]
     IPVAxxx = F[1]
