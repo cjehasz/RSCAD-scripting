@@ -1,5 +1,8 @@
 # Holds class definitions for components for the control functions
 
+import math
+import numpy
+
 
 # Limit function is bypassed if both upper and lower bound are set to zero
 def limit(x, lower_lim, upper_lim):
@@ -114,7 +117,7 @@ class MPPT:
 
 class PiControlVDC:
 
-    def __init__(self, KiVDC, KpVDC, VDCmax, VDCmin):
+    def __init__(self, KiVDC, KpVDC, VDCmax, VDCmin, dt):
         self.KiVDC = KiVDC
         self.KpVDC = KpVDC
         self.VDCmax = VDCmax
@@ -139,3 +142,107 @@ class PiControlVDC:
         self.fb_loop = PrefPV - unlimited_PrefPV
 
         return PrefPV
+
+
+class VarFreqRampGen:
+
+    def __init__(self, max_ramp, min_ramp, T, dt):
+        self.min = min_ramp
+        self.max = max_ramp
+        self.integrator = Integrator(min_ramp, T, max_ramp, min_ramp, dt)
+        self.output = min_ramp
+
+    def calculate(self, x):
+
+        self.output = self.integrator.calculate(x)
+
+        if self.output >= self.max:
+            self.integrator.reset()
+
+        return self.output
+
+
+class PLL:
+    def __init__(self, dt, FDEV8):
+        self.SA8 = 0
+        self.SB8 = 0
+        self.SC8 = 0
+        self.CA8 = 0
+        self.CB8 = 0
+        self.CC8 = 0
+        self.erra8 = 0
+        self.errb8 = 0
+        self.errc8 = 0
+        self.integrator_UDO = Integrator(0, 1.0, 0, 0, dt)
+        self.integrator_DWO = Integrator(0, 1.0, 0, 0, dt)
+        self.ramp = VarFreqRampGen((2 * math.pi), 0, 1.0, dt)
+        self.DWOMAX8 = (2 * math.pi) * FDEV8
+        self.DWOMIN8 = -1 * self.DWOMAX8
+        self.ERR_58 = 0
+        self.OMEGA8 = 0
+        self.angPLL8 = 0
+
+    def calculate(self, VSAA8, VSBA8, VSCA8, Vbase8, FACT8, wA8):
+        N4Apu8 = VSAA8 / Vbase8
+        N5Apu8 = VSBA8 / Vbase8
+        N6Apu8 = VSCA8 / Vbase8
+        UDO8 = ((self.SA8 * self.erra8) + (self.SB8 * self.errb8) + (self.SC8 * self.errc8)) * (800 / 3)
+        UO8 = self.integrator_UDO.calculate(UDO8)
+        self.erra8 = N4Apu8 - (UO8 * self.SA8)
+        self.errb8 = N5Apu8 - (UO8 * self.SB8)
+        self.errc8 = N6Apu8 - (UO8 * self.SC8)
+        self.ERR_58 = ((self.erra8 * self.CA8) + (self.errb8 * self.CB8) + (self.errc8 * self.CC8)) * (2 / 3)
+        DWOLIM8 = limit(self.integrator_DWO.calculate(self.ERR_58 * 20000), self.DWOMIN8, self.DWOMAX8)
+        self.OMEGA8 = (DWOLIM8 * FACT8) + wA8
+        self.angPLL8 = self.ramp.calculate(self.OMEGA8 + self.ERR_58)
+        ANGA8 = self.angPLL8
+        ANGB8 = self.angPLL8 - (2 * math.pi / 3)
+        ANGC8 = self.angPLL8 + (2 * math.pi / 3)
+        self.SA8 = math.sin(ANGA8)
+        self.SB8 = math.sin(ANGB8)
+        self.SC8 = math.sin(ANGC8)
+        self.CA8 = math.cos(ANGA8)
+        self.CB8 = math.cos(ANGB8)
+        self.CC8 = math.cos(ANGC8)
+
+        return self.angPLL8, self.OMEGA8, self.ERR_58
+
+
+class ABC2DQO:
+
+    def __init__(self, Vq_lags_Vd):
+        self.Vq_lags_Vd = Vq_lags_Vd
+        self.con = 2*math.pi/3
+
+    def calculate(self, phase, Va, Vb, Vc):
+
+        if self.Vq_lags_Vd:
+            transform = numpy.array([[math.sin(phase), math.sin(phase-self.con), math.sin(phase+self.con)],
+                                    [math.cos(phase), math.cos(phase-self.con), math.cos(phase+self.con)],
+                                    [(1/2), (1/2), (1/2)]])
+        else:
+            transform = numpy.array([[math.cos(phase), math.cos(phase - self.con), math.cos(phase + self.con)],
+                                     [math.sin(phase), math.sin(phase - self.con), math.sin(phase + self.con)],
+                                     [(1 / 2), (1 / 2), (1 / 2)]])
+
+        Vdqo = (2/3) * numpy.matmul(transform, numpy.array([[Va], [Vb], [Vc]]))
+
+        return Vdqo[0, 0], Vdqo[1, 0], Vdqo[2, 0]      # Returns Vd, Vq, Vo
+
+
+class EnhancedPLL:
+
+    def __init__(self, dt, FDEV8):
+        self.pll = PLL(dt, FDEV8)
+        self.abc_to_dqo_V = ABC2DQO(True)
+        self.abc_to_dqo_I = ABC2DQO(True)
+        # self.angPLL8 = 0
+        # self.OMEAGA8 = 0
+        # self.ERR_58 = 0
+
+    def calculate(self, VSAA8, VSBA8, VSCA8, Vbase8, FACT8, wA8, IAA8, IBA8, ICA8):
+        angPLL8, OMEAGA8, ERR_58 = self.pll.calculate(VSAA8, VSBA8, VSCA8, Vbase8, FACT8, wA8)
+        VsdA8, VsqA8, VsoA8 = self.abc_to_dqo_V.calculate(angPLL8, VSAA8, VSBA8, VSCA8)
+        IsdA8, IsqA8, IsoA8 = self.abc_to_dqo_I.calculate(angPLL8, -1*IAA8, -1*IBA8, -1*ICA8)
+
+        return VsdA8, VsqA8, IsdA8, IsqA8, OMEAGA8, ERR_58
